@@ -280,6 +280,35 @@ oracle_solvert::check_resultt oracle_solvert::check_oracle(
             response_equality);
     sub_solver.set_to_true(implication);        
 
+    /* NOTE
+     * f(a) = b --> b - L / sqrt(n) * one_norm(x - a) \leq f(x) \leq b + L / sqrt(n) * one_norm(x - a)
+     * x : argument_handle
+     * a : get(argument_handle)
+     * b : response
+     * f(x) : application_handle
+     * n : application.argument_handles.size()
+     * */
+    /* exprt::operandst distances; */
+    /* for (auto &argument_handle : application.argument_handles) */
+    /*     distances.push_back(abs_exprt(minus_exprt(argument_handle, get(argument_handle)))); */
+    /* auto one_norm = plus_exprt(distances, real_typet()); */
+
+    /* float L = 6.0; */
+    /* auto constant = constant_exprt(std::to_string(L / sqrt(application.argument_handles.size())), real_typet()); */
+    /* auto lower_bound = binary_predicate_exprt(minus_exprt(response, mult_exprt(constant, one_norm)), ID_le, application.handle); */
+    /* auto upper_bound = binary_predicate_exprt(plus_exprt(response, mult_exprt(constant, one_norm)), ID_ge, application.handle); */
+    /* /1* log.debug() << "Lower bound: " << expr2sygus(lower_bound) << messaget::eom; *1/ */
+    /* /1* log.debug() << "Upper bound: " << expr2sygus(upper_bound) << messaget::eom; *1/ */
+    /* sub_solver.set_to_true(lower_bound); */
+    /* sub_solver.set_to_true(upper_bound); */
+  }
+  { 
+	auto response_equality = equal_exprt(application.handle, response);
+	assump_lits.push_back(sub_solver.handle(response_equality));
+	for (auto &argument_handle : application.argument_handles) {
+		auto equality = equal_exprt(argument_handle, get(argument_handle));
+		assump_lits.push_back(sub_solver.handle(equality));
+	}
   }
   return INCONSISTENT;
 }

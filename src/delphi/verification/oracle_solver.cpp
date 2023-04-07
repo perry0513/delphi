@@ -16,6 +16,10 @@
 #include <solvers/smt2/smt2_dec.h>
 
 
+#include <chrono>
+float smt_solve_time = 0;
+float oracle_call_time = 0;
+
 oracle_solvert::oracle_solvert(
   decision_proceduret &__sub_solver,
   message_handlert &__message_handler) :
@@ -120,6 +124,7 @@ std::string oracle_solvert::decision_procedure_text() const
 
 oracle_solvert::check_resultt oracle_solvert::check_oracles()
 {
+    std::cout << "check oracles\n" << std::flush;
   oracle_solvert::check_resultt result = CONSISTENT;
 
 // std::cout<<"There are "<< applications.size()<<" applications in check oracles\n";
@@ -185,7 +190,7 @@ exprt oracle_solvert::make_oracle_call(const std::string &binary_name, const std
   }
   // we assume that the oracle returns the result in SMT-LIB format
   std::istringstream oracle_response_istream(stdout_stream.str());
-//  log.debug() << "Oracle response is "<< stdout_stream.str() << messaget::eom;
+  log.debug() << "Oracle response is "<< stdout_stream.str() << messaget::eom;
   return oracle_response_parser(oracle_response_istream);
 }
 
@@ -246,10 +251,13 @@ oracle_solvert::check_resultt oracle_solvert::check_oracle(
     inputs.push_back(res);
   } 
 
+  auto start = std::chrono::steady_clock::now();
    exprt response = call_oracle(application, inputs);
+  auto end = std::chrono::steady_clock::now();
+  oracle_call_time += (end-start).count() * 1e-9;
+  std::cout << "Oracle time: " << oracle_call_time << '\n';
    if(response==nil_exprt())
      return check_resultt::ERROR;
-
 
   // check whether the result is consistent with the model
   if(response == get(application.handle))
@@ -262,11 +270,13 @@ oracle_solvert::check_resultt oracle_solvert::check_oracle(
     function_application_exprt func_app(application_expr.function(), inputs);
 
     // log.debug() << "Response does not match " << expr2sygus(get(application.handle)) << messaget::eom;
+    log.debug() << "Response " << expr2sygus(response) << " does not match " << expr2sygus(get(application.handle)) << messaget::eom; 
 
     // add a constraint that enforces this equality
     auto response_equality = equal_exprt(application.handle, response);
     // auto response_equality = equal_exprt(func_app, response);
     // set_to_true(response_equality);
+    /* log.debug() << "Equality: " << expr2sygus(response_equality) << messaget::eom; */
 
     exprt::operandst input_constraints;
 
@@ -278,29 +288,34 @@ oracle_solvert::check_resultt oracle_solvert::check_oracle(
         implies_exprt(
             conjunction(input_constraints),
             response_equality);
+    /* log.debug() << "Implication: " << expr2sygus(implication) << messaget::eom; */
     sub_solver.set_to_true(implication);        
 
     /* NOTE
-     * f(a) = b --> b - L / sqrt(n) * one_norm(x - a) \leq f(x) \leq b + L / sqrt(n) * one_norm(x - a)
+     * f(a) = b --> b - L / sqrt(n) * norm(x - a) \leq f(x) \leq b + L / sqrt(n) * norm(x - a)
      * x : argument_handle
      * a : get(argument_handle)
      * b : response
      * f(x) : application_handle
      * n : application.argument_handles.size()
      * */
-    /* exprt::operandst distances; */
-    /* for (auto &argument_handle : application.argument_handles) */
-    /*     distances.push_back(abs_exprt(minus_exprt(argument_handle, get(argument_handle)))); */
-    /* auto one_norm = plus_exprt(distances, real_typet()); */
+    exprt::operandst distances;
+    for (auto &argument_handle : application.argument_handles)
+        distances.push_back(abs_exprt(minus_exprt(argument_handle, get(argument_handle))));
+    // one norm
+    /* auto norm = plus_exprt(distances, real_typet()); */
+    // infinity norm
+    auto norm = max(distances);
 
-    /* float L = 6.0; */
+    float L = 1.83;
     /* auto constant = constant_exprt(std::to_string(L / sqrt(application.argument_handles.size())), real_typet()); */
-    /* auto lower_bound = binary_predicate_exprt(minus_exprt(response, mult_exprt(constant, one_norm)), ID_le, application.handle); */
-    /* auto upper_bound = binary_predicate_exprt(plus_exprt(response, mult_exprt(constant, one_norm)), ID_ge, application.handle); */
-    /* /1* log.debug() << "Lower bound: " << expr2sygus(lower_bound) << messaget::eom; *1/ */
-    /* /1* log.debug() << "Upper bound: " << expr2sygus(upper_bound) << messaget::eom; *1/ */
-    /* sub_solver.set_to_true(lower_bound); */
-    /* sub_solver.set_to_true(upper_bound); */
+    auto constant = constant_exprt(std::to_string(L), real_typet());
+    auto lower_bound = binary_predicate_exprt(minus_exprt(response, mult_exprt(constant, norm)), ID_le, application.handle);
+    auto upper_bound = binary_predicate_exprt(plus_exprt(response, mult_exprt(constant, norm)), ID_ge, application.handle);
+    /* log.debug() << "Lower bound: " << expr2sygus(lower_bound) << messaget::eom; */
+    /* log.debug() << "Upper bound: " << expr2sygus(upper_bound) << messaget::eom; */
+    sub_solver.set_to_true(lower_bound);
+    sub_solver.set_to_true(upper_bound);
   }
   { 
 	auto response_equality = equal_exprt(application.handle, response);
@@ -313,19 +328,35 @@ oracle_solvert::check_resultt oracle_solvert::check_oracle(
   return INCONSISTENT;
 }
 
-
+exprt oracle_solvert::max(exprt::operandst &lst)
+{
+    if (lst.empty()) assert(false);
+    exprt ret_expr = lst[0];
+    for (size_t i = 1; i < lst.size(); ++i) {
+        auto cond = binary_predicate_exprt(ret_expr, ID_ge, lst[i]);
+        ret_expr = if_exprt(cond, ret_expr, lst[i]);
+    }
+    return ret_expr;
+}
 
 decision_proceduret::resultt oracle_solvert::dec_solve()
 {
   PRECONDITION(oracle_fun_map != nullptr);
+  static int i = 0;
 
   number_of_solver_calls++;
 
   while(true)
   {
+    std::cout << "\niter " << ++i << '\n';
+    auto start = std::chrono::steady_clock::now();
+    auto end = std::chrono::steady_clock::now();
     switch(sub_solver())
     {
     case resultt::D_SATISFIABLE:
+      end = std::chrono::steady_clock::now();
+      smt_solve_time += (end-start).count() * 1e-9;
+      std::cout << "SMT time: " << smt_solve_time << '\n';
       switch(check_oracles())
       {
       case INCONSISTENT:
@@ -340,6 +371,9 @@ decision_proceduret::resultt oracle_solvert::dec_solve()
       break;
 
     case resultt::D_UNSATISFIABLE:
+      end = std::chrono::steady_clock::now();
+      smt_solve_time += (end-start).count() * 1e-9;
+      std::cout << "SMT time: " << smt_solve_time << '\n';
       return resultt::D_UNSATISFIABLE;
 
     case resultt::D_ERROR:

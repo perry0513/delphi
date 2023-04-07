@@ -42,6 +42,7 @@ public:
   exprt get_oracle_value(const function_application_exprt &oracle_app);
   // make call to oracle with single return
   exprt make_oracle_call(const std::string &binary_name, const std::vector<std::string> &argv);
+  exprt max(exprt::operandst &lst);
 
   struct applicationt
   {

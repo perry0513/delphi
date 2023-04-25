@@ -303,19 +303,27 @@ oracle_solvert::check_resultt oracle_solvert::check_oracle(
     for (auto &argument_handle : application.argument_handles)
         distances.push_back(abs_exprt(minus_exprt(argument_handle, get(argument_handle))));
     // one norm
-    /* auto norm = plus_exprt(distances, real_typet()); */
+    auto norm = plus_exprt(distances, real_typet());
     // infinity norm
-    auto norm = max(distances);
+    /* auto norm = max(distances); */
 
     float L = 1.83;
-    /* auto constant = constant_exprt(std::to_string(L / sqrt(application.argument_handles.size())), real_typet()); */
-    auto constant = constant_exprt(std::to_string(L), real_typet());
+    float eps = 0.01;
+    size_t dim = application.argument_handles.size();
+    // one norm
+    auto constant = constant_exprt(std::to_string(L / sqrt(dim)), real_typet());
+    auto eps_constant = constant_exprt(std::to_string(eps / sqrt(dim)), real_typet());
+    // infinity norm
+    /* auto constant = constant_exprt(std::to_string(L), real_typet()); */
+    auto domain_bound = binary_predicate_exprt(norm, ID_le, eps_constant);
     auto lower_bound = binary_predicate_exprt(minus_exprt(response, mult_exprt(constant, norm)), ID_le, application.handle);
     auto upper_bound = binary_predicate_exprt(plus_exprt(response, mult_exprt(constant, norm)), ID_ge, application.handle);
     /* log.debug() << "Lower bound: " << expr2sygus(lower_bound) << messaget::eom; */
     /* log.debug() << "Upper bound: " << expr2sygus(upper_bound) << messaget::eom; */
-    sub_solver.set_to_true(lower_bound);
-    sub_solver.set_to_true(upper_bound);
+    /* sub_solver.set_to_true(lower_bound); */
+    /* sub_solver.set_to_true(upper_bound); */
+    auto lip_implication = implies_exprt(domain_bound, and_exprt(lower_bound, upper_bound));
+    sub_solver.set_to_true(lip_implication);
   }
   { 
 	auto response_equality = equal_exprt(application.handle, response);
